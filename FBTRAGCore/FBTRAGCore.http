@@ -1,0 +1,6 @@
+@FBTRAGCore_HostAddress = http://localhost:5125
+
+GET {{FBTRAGCore_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###
