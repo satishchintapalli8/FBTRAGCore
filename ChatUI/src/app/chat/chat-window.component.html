@@ -1,20 +1,23 @@
 <nb-layout>
   <nb-layout-column>
+    <div class="chat-wrapper">
 
-    <nb-chat title="Support Chat" size="medium">
+      <!-- Chat Window -->
+      <nb-chat title="FBT Support Chat" size="medium" class="chat-box">
+        <nb-chat-message
+          *ngFor="let msg of messages"
+          [message]="msg.text"
+          [avatar]="msg.sender === 'user' ? 'assets/user-icon.png' : 'assets/bot-icon.png'"
+          [reply]="msg.sender === 'user'">
+        </nb-chat-message>
+      </nb-chat>
 
-      <nb-chat-message
-        *ngFor="let msg of messages"      
-        [message]="msg.text"
-        [reply]="msg.sender === 'user'">
-      </nb-chat-message>
+      <!-- Input at Bottom -->
+      <div class="input-box">
+        <input [(ngModel)]="userInput" (keyup.enter)="sendMessage()"  placeholder="Type here..." />
+        <button (click)="sendMessage()" [disabled]="loading || userInput==''">Send</button>
+      </div>
 
-    </nb-chat>
-
-    <div class="input-box">
-      <input [(ngModel)]="userInput" (keyup.enter)="sendMessage()" placeholder="Type here..." />
-      <button (click)="sendMessage()">Send</button>
     </div>
-
   </nb-layout-column>
 </nb-layout>

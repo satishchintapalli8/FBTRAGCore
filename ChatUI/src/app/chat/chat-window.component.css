@@ -1,16 +1,32 @@
+.chat-wrapper {
+  display: flex;
+  flex-direction: column;
+  height: 90vh; /* full vertical height */
+}
+
+.chat-box {
+  flex-grow: 1;
+  overflow-y: auto;
+}
+
 .input-box {
   display: flex;
-  margin-top: 10px;
+  padding: 10px;
+  border-top: 1px solid #ccc;
+  background-color: #f7f9fc;
 }
 
-input {
+.input-box input {
   flex: 1;
   padding: 8px;
-  border-radius: 4px;
   border: 1px solid #ccc;
+  border-radius: 4px;
+  margin-right: 8px;
 }
 
-button {
-  margin-left: 10px;
+.input-box button {
   padding: 8px 16px;
+}
+::ng-deep .nb-theme-default nb-chat-message.not-reply nb-chat-message-text .text{
+        background: #757989 !important;
 }

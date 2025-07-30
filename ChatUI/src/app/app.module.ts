@@ -5,7 +5,8 @@ import { AppRoutingModule } from './app-routing.module';
 import { AppComponent } from './app.component';
 import { ChatWindowComponent } from './chat/chat-window.component';
 import { ChatMessageComponent } from './chat/chat-message.component';
-import { NbChatModule, NbLayoutModule, NbThemeModule } from '@nebular/theme';
+import { NbThemeModule, NbLayoutModule, NbChatModule, NbInputModule, NbButtonModule } from '@nebular/theme';
+import { NbEvaIconsModule } from '@nebular/eva-icons';
 import { HttpClientModule } from '@angular/common/http';
 import { FormsModule } from '@angular/forms';
 import { BrowserAnimationsModule } from '@angular/platform-browser/animations';
@@ -24,7 +25,10 @@ import { BrowserAnimationsModule } from '@angular/platform-browser/animations';
     HttpClientModule,
     NbThemeModule.forRoot({ name: 'default' }),
     NbLayoutModule,
+    NbEvaIconsModule,
     NbChatModule,
+    NbInputModule,
+    NbButtonModule
   ],
   providers: [],
   bootstrap: [AppComponent]
