@@ -1,0 +1,3 @@
+<div [ngClass]="{'user-msg': message.sender === 'user', 'bot-msg': message.sender === 'bot'}">
+  {{ message.text }}
+</div>
