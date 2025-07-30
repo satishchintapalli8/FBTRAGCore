@@ -2,6 +2,6 @@
 {
     public interface IChatService
     {
-        Task<string> GetChatResponseAsync(string userQuery, string categoryFilter = null);
+        Task<string> GetChatResponseAsync(string userQuery, string userId = "satish");
     }
 }

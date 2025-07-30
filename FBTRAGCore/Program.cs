@@ -61,7 +61,7 @@ builder.Services.AddSingleton<Kernel>(sp =>
     var kernelBuilder = Kernel.CreateBuilder();
 
     var ollamaBaseUrl = "http://localhost:11434/";
-    var ollamaChatModelId = "llama3.2";
+    var ollamaChatModelId = "llama3.1:8b";
     var ollamaEmbeddingModelId = "nomic-embed-text";
 
     kernelBuilder.AddOllamaChatCompletion(
@@ -73,7 +73,8 @@ builder.Services.AddSingleton<Kernel>(sp =>
         modelId: ollamaEmbeddingModelId,
         endpoint: new Uri(ollamaBaseUrl)
     );
-    
+    kernelBuilder.Plugins.AddFromType<FbtPlugins>("Fbt");
+
     return kernelBuilder.Build();
 });
 

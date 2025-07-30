@@ -7,6 +7,8 @@ using FBTRAGCore.Models;
 using System.Text;
 using Qdrant.Client.Grpc;
 using Qdrant.Client;
+using Microsoft.SemanticKernel.Connectors.Ollama;
+using System.Collections.Concurrent;
 
 namespace FBTRAGCore.Services
 {
@@ -14,13 +16,13 @@ namespace FBTRAGCore.Services
     {
         private readonly Kernel _kernel;
         private readonly ILogger<ChatService> _logger;
-        private readonly VectorStore _vectorStore; 
-        private readonly IEmbeddingGenerator<string, Embedding<float>> _embeddingGenerator; 
-        private readonly IChatCompletionService _chatCompletionService; 
-
+        private readonly VectorStore _vectorStore;
+        private readonly IEmbeddingGenerator<string, Embedding<float>> _embeddingGenerator;
+        private readonly IChatCompletionService _chatCompletionService;
         private const string CollectionName = "fbt-knowledge-base";
 
-        public IServiceProvider ServiceProvider { get; }
+        // Static in-memory chat history per user (use cache/db in real apps)
+        private static readonly ConcurrentDictionary<string, ChatHistory> _userChatHistories = new();
 
         public ChatService(
             Kernel kernel,
@@ -30,103 +32,91 @@ namespace FBTRAGCore.Services
         {
             _kernel = kernel;
             _vectorStore = vectorStore;
-            ServiceProvider = serviceProvider;
             _logger = logger;
             _embeddingGenerator = _kernel.GetRequiredService<IEmbeddingGenerator<string, Embedding<float>>>();
-            _chatCompletionService = _kernel.GetRequiredService<IChatCompletionService>(); 
+            _chatCompletionService = _kernel.GetRequiredService<IChatCompletionService>();
         }
 
-        public async Task<string> GetChatResponseAsync(string userQuery, string categoryFilter = null)
+        public async Task<string> GetChatResponseAsync(string userQuery, string userId)
         {
-            _logger.LogInformation("Processing chat query: '{UserQuery}'", userQuery);
+            _logger.LogInformation("Processing query for user '{UserId}': {Query}", userId, userQuery);
 
-            // 1. Generate embedding for the user's query
+            // 1. Generate embedding
             Embedding<float> userQueryEmbedding;
             try
             {
                 userQueryEmbedding = await _embeddingGenerator.GenerateAsync(userQuery);
-                _logger.LogDebug("User query embedded successfully.");
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error generating embedding for user query.");
-                return "I'm sorry, I couldn't process your request right now due to an embedding error.";
+                _logger.LogError(ex, "Embedding failed.");
+                return "I'm sorry, I couldn't process your request.";
             }
 
-            // 2. Perform semantic search in Qdrant            
+            // 2. Semantic search
             var collection = _vectorStore.GetCollection<Guid, DocumentRecord>(CollectionName);
-            var searchOptions = new VectorSearchOptions<DocumentRecord>
-            {
-                           
-            };
+            var searchOptions = new VectorSearchOptions<DocumentRecord>();
 
-            if (!string.IsNullOrEmpty(categoryFilter))
-            {
-                searchOptions.Filter = r => r.Category == categoryFilter;
-                _logger.LogInformation("Applying category filter: {Category}", categoryFilter);
-            }
 
-            List<DocumentRecord> relevantDocuments = new List<DocumentRecord>();
+            List<DocumentRecord> relevantDocs = new();
             try
             {
-                int topResult = 3;
-                VectorSearchOptions<DocumentRecord> vectorSearchExtensions = new VectorSearchOptions<DocumentRecord>()
-                {
-                    IncludeVectors = true
-                };
-                var results = collection.SearchAsync<Embedding<float>>(userQueryEmbedding, topResult, vectorSearchExtensions);
+                var results = collection.SearchAsync<Embedding<float>>(userQueryEmbedding, 3, new VectorSearchOptions<DocumentRecord> { IncludeVectors = true });
                 await foreach (var result in results)
                 {
-                    if (result != null && result.Record != null && !string.IsNullOrWhiteSpace(result.Record.Content))
-                    {
-                        relevantDocuments.Add(result.Record);
-                        _logger.LogDebug("Found relevant document: {Source} (Page: {PageNumber}, Score: {Score})", result.Record.Source, result.Record.PageNumber, result.Score);
-                    }
+                    if (!string.IsNullOrWhiteSpace(result?.Record?.Content))
+                        relevantDocs.Add(result.Record);
                 }
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error searching Qdrant for relevant documents.");                
+                _logger.LogError(ex, "Qdrant search failed.");
             }
-            
-            var chatHistory = new ChatHistory();
-            //chatHistory.AddSystemMessage("You are a helpful assistant. Answer questions based on the provided context. If the answer is not in the context, state that you don't know, and do not make up information. Be concise and to the point.");
 
-            if (relevantDocuments.Any())
+            // 3. Prepare or get chat history
+            var chatHistory = _userChatHistories.GetOrAdd(userId, new ChatHistory());
+            if (chatHistory.Count == 0)
             {
-                StringBuilder contextBuilder = new StringBuilder();
+                chatHistory.AddSystemMessage("You are a helpful assistant. Use provided knowledge base if available. If not, respond generally.");
+            }
+
+            // 4. Add context if documents found
+            if (relevantDocs.Any())
+            {
+                StringBuilder contextBuilder = new();
                 contextBuilder.AppendLine("Context from knowledge base:");
-                foreach (var doc in relevantDocuments.OrderBy(d => d.PageNumber).ThenBy(d => d.ChunkIndex))
+                foreach (var doc in relevantDocs.OrderBy(d => d.PageNumber).ThenBy(d => d.ChunkIndex))
                 {
                     contextBuilder.AppendLine($"- From '{doc.Source}', Page {doc.PageNumber}, Chunk {doc.ChunkIndex}: {doc.Content}");
                 }
-                contextBuilder.AppendLine("End of context.");
-                contextBuilder.AppendLine();
-
-                chatHistory.AddUserMessage(contextBuilder.ToString() + "Based on the provided context, answer the following question: " + userQuery);
-                _logger.LogInformation("Augmented prompt with {Count} relevant documents.", relevantDocuments.Count);
+                contextBuilder.AppendLine("End of context.\n");
+                chatHistory.AddUserMessage($"{contextBuilder}\nBased on the context, answer: {userQuery}");
             }
             else
             {
-                _logger.LogWarning("No relevant documents found for query: '{UserQuery}'. Answering without specific context.", userQuery);
-                chatHistory.AddUserMessage("No specific context found. " + userQuery);
+                chatHistory.AddUserMessage(userQuery);
             }
 
-            // 4. Get response from the LLM (Llama via Ollama)
-            string llmResponse;
+            // 5. Get LLM reply
+            string response;
             try
             {
-                var result = await _chatCompletionService.GetChatMessageContentAsync(chatHistory);
-                llmResponse = result.Content;
-                _logger.LogInformation("LLM responded successfully.");
+                OllamaPromptExecutionSettings ollamaPromptExecutionSettings = new OllamaPromptExecutionSettings
+                {
+                    FunctionChoiceBehavior = FunctionChoiceBehavior.Auto()
+                };
+                var result = await _chatCompletionService.GetChatMessageContentAsync(chatHistory, ollamaPromptExecutionSettings, _kernel);
+                response = result.Content;
+                chatHistory.AddAssistantMessage(response);
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error getting response from LLM (Ollama).");
-                return "I'm sorry, I couldn't get a response from the AI model at this moment.";
+                _logger.LogError(ex, "LLM call failed.");
+                return "Sorry, I couldn't get a response from the AI.";
             }
 
-            return llmResponse;
+            return response;
         }
     }
+
 }
